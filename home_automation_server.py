@@ -37,126 +37,259 @@ INDEX_HTML = """<!doctype html>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     :root {
-      --bg: #f5f7fa;
+      --bg: #f4f6fa;
       --text: #222;
       --card-bg: #fff;
       --meta: #666;
-      --off-btn: #555;
-      --shadow: rgba(0,0,0,0.1);
+      --off-btn: #666;
+      --shadow: rgba(0,0,0,0.08);
+      --accent: #0b9;
+      --card-border: #e2e8f0;
+      --hover-scale: 1.02;
     }
+
     body.dark {
-      --bg: #121212;
+      --bg: #0f1115;
       --text: #eaeaea;
-      --card-bg: #1e1e1e;
-      --meta: #aaa;
-      --off-btn: #777;
+      --card-bg: #181b20;
+      --meta: #999;
+      --off-btn: #888;
       --shadow: rgba(0,0,0,0.6);
+      --card-border: #2c2f34;
+      --accent: #00c2a8;
     }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial;
-      margin: 16px;
+      font-family: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial;
       background: var(--bg);
       color: var(--text);
+      margin: 0;
+      padding: 24px;
       transition: background 0.3s, color 0.3s;
     }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+
+    h2 {
+      font-size: 1.5em;
+      margin: 0;
+    }
+
+    .small {
+      font-size: 13px;
+      color: var(--meta);
+    }
+
+    .dark-toggle {
+      padding: 8px 14px;
+      border-radius: 10px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      cursor: pointer;
+      box-shadow: 0 4px 10px var(--shadow);
+      transition: all 0.3s;
+    }
+
+    .dark-toggle:hover {
+      transform: scale(1.05);
+    }
+
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill,minmax(260px,1fr));
-      gap: 12px;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
     }
+
     .card {
-      border-radius: 12px;
-      box-shadow: 0 6px 18px var(--shadow);
-      padding: 12px;
       background: var(--card-bg);
-      transition: background 0.3s, box-shadow 0.3s;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 6px 20px var(--shadow);
+      border: 1px solid var(--card-border);
+      transition: transform 0.3s, box-shadow 0.3s;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
     }
-    .title { font-weight: 600; margin-bottom: 6px; }
-    .meta { color: var(--meta); font-size: 13px; margin-bottom: 8px; }
-    .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+
+    .card:hover {
+      transform: scale(var(--hover-scale));
+      box-shadow: 0 10px 25px var(--shadow);
+    }
+
+    .title {
+      font-weight: 600;
+      font-size: 1.1em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .device-icon {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      background: var(--accent);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 12px;
+    }
+
+    .meta {
+      color: var(--meta);
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
     .toggle {
-      padding:8px 12px;
-      border-radius:8px;
-      cursor:pointer;
-      border:none;
-      transition: background 0.3s, color 0.3s;
-    }
-    .on { background:#0b9; color:white; }
-    .off { background:var(--off-btn); color:white; }
-    input[type=range] { width:100%; }
-    .small { font-size:12px; color:var(--meta); }
-    .dark-toggle {
-      position: fixed;
-      top: 12px;
-      right: 12px;
-      padding: 8px 12px;
-      border: none;
+      padding: 10px 14px;
       border-radius: 8px;
       cursor: pointer;
-      background: var(--card-bg);
-      color: var(--text);
-      box-shadow: 0 4px 10px var(--shadow);
-      transition: background 0.3s, color 0.3s, box-shadow 0.3s;
+      border: none;
+      font-weight: 500;
+      transition: all 0.25s;
+    }
+
+    .on {
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 4px 10px rgba(0, 200, 150, 0.25);
+    }
+
+    .off {
+      background: var(--off-btn);
+      color: white;
+      opacity: 0.9;
+    }
+
+    input[type=range] {
+      width: 100%;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .brightness-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .brightness-label {
+      font-size: 12px;
+      color: var(--meta);
+      text-align: right;
     }
   </style>
 </head>
+
 <body>
-  <button id="darkModeToggle" class="dark-toggle">🌙 Dark Mode</button>
-  <h2>WeMo + LIFX devices</h2>
-  <p class="small">Auto-discovers every 30s and refreshes every 3s</p>
+  <header>
+    <div>
+      <h2>Smart Home Dashboard</h2>
+      <p class="small">Auto-discovers every 30s · Refreshes every 3s</p>
+    </div>
+    <button id="darkModeToggle" class="dark-toggle">🌙 Dark Mode</button>
+  </header>
+
   <div id="grid" class="grid"></div>
 
 <script>
-async function fetchDevices(){
+async function fetchDevices() {
   try {
     const res = await fetch('/api/devices');
     const data = await res.json();
     render(data.devices);
-  } catch(e) { console.error('fetch error', e); }
+  } catch (e) {
+    console.error('fetch error', e);
+  }
 }
 
-function render(devices){
+function render(devices) {
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
-  devices.forEach(d=>{
-    const card=document.createElement('div');card.className='card';
-    const name=document.createElement('div');name.className='title';name.textContent=d.name;
-    const meta=document.createElement('div');meta.className='meta';meta.textContent=(d.model||'')+' · '+(d.ip||'')+' · '+d.type;
-    const controls=document.createElement('div');controls.className='controls';
+  devices.forEach(d => {
+    const card = document.createElement('div');
+    card.className = 'card';
 
-    const toggle=document.createElement('button');
-    toggle.className='toggle '+(d.state?'on':'off');
-    toggle.textContent=d.state?'On':'Off';
-    toggle.onclick=async()=>{
-      toggle.disabled=true;
+    const name = document.createElement('div');
+    name.className = 'title';
+    const icon = document.createElement('div');
+    icon.className = 'device-icon';
+    icon.textContent = d.type?.[0]?.toUpperCase() || '•';
+    name.appendChild(icon);
+    name.appendChild(document.createTextNode(d.name));
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = `${d.model || ''} · ${d.ip || ''} · ${d.type}`;
+
+    const controls = document.createElement('div');
+    controls.className = 'controls';
+
+    const toggle = document.createElement('button');
+    toggle.className = 'toggle ' + (d.state ? 'on' : 'off');
+    toggle.textContent = d.state ? 'On' : 'Off';
+    toggle.onclick = async () => {
+      toggle.disabled = true;
       try {
-        await fetch(`/api/device/${d.uuid}/toggle`,{method:'POST'});
+        await fetch(`/api/device/${d.uuid}/toggle`, { method: 'POST' });
         await fetchDevices();
-      } catch(e){ console.error(e); } 
-      finally { toggle.disabled=false; }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        toggle.disabled = false;
+      }
     };
     controls.appendChild(toggle);
 
-    if(d.brightness!==null && d.brightness!==undefined){
-      const wrapper=document.createElement('div');wrapper.style.width='100%';
-      const slider=document.createElement('input');
-      slider.type='range';slider.min=0;slider.max=100;slider.value=d.brightness;
-      slider.onchange=async(ev)=>{
+    if (d.brightness !== null && d.brightness !== undefined) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'brightness-wrapper';
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = 0;
+      slider.max = 100;
+      slider.value = d.brightness;
+
+      const label = document.createElement('div');
+      label.className = 'brightness-label';
+      label.textContent = `Brightness: ${d.brightness}`;
+
+      slider.oninput = (ev) => {
+        label.textContent = `Brightness: ${ev.target.value}`;
+      };
+
+      slider.onchange = async (ev) => {
         try {
-          await fetch(`/api/device/${d.uuid}/brightness`,{
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({brightness:Number(ev.target.value)})
+          await fetch(`/api/device/${d.uuid}/brightness`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ brightness: Number(ev.target.value) })
           });
           await fetchDevices();
-        } catch(e){ console.error(e); }
+        } catch (e) {
+          console.error(e);
+        }
       };
-      const bv=document.createElement('div');
-      bv.className='small';
-      bv.textContent='Brightness: '+d.brightness;
-      slider.oninput=(ev)=>{bv.textContent='Brightness: '+ev.target.value;};
+
       wrapper.appendChild(slider);
-      wrapper.appendChild(bv);
+      wrapper.appendChild(label);
       controls.appendChild(wrapper);
     }
 
@@ -168,7 +301,7 @@ function render(devices){
 }
 
 fetchDevices();
-setInterval(fetchDevices,3000);
+setInterval(fetchDevices, 3000);
 
 // Dark mode toggle logic
 const toggleBtn = document.getElementById('darkModeToggle');
