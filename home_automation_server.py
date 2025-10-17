@@ -269,6 +269,7 @@ def api_toggle(udn):
     try:
         if dtype == 'wemo':
             # use toggle if available
+            print("toggle:wemo")
             if hasattr(dev, 'toggle'):
                 dev.toggle()
             else:
@@ -295,6 +296,7 @@ def api_toggle(udn):
 
         elif dtype == 'lifx':
             # lifx get_power returns 0 or 65535 (or similar); toggle
+            print("toggle:lifx")
             try:
                 cur_power = dev.get_power()
                 new_power = 0 if cur_power and cur_power > 0 else 65535
@@ -307,6 +309,7 @@ def api_toggle(udn):
                     dev.set_power(65535)
             # optimistic update
             with DEVICES_LOCK:
+                print(f"lifx optimistic update..")
                 DEVICES[udn]['state'] = 1 if dev.get_power() and dev.get_power() > 0 else 0
                 DEVICES[udn]['last_seen'] = time.time()
         else:
