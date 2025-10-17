@@ -36,31 +36,85 @@ INDEX_HTML = """<!doctype html>
   <title>Smart Home Dashboard</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial; margin: 16px; background: #f5f7fa; color:#222; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap: 12px; }
-    .card { border-radius: 12px; box-shadow: 0 6px 18px rgba(0,0,0,0.1); padding: 12px; background: white; }
+    :root {
+      --bg: #f5f7fa;
+      --text: #222;
+      --card-bg: #fff;
+      --meta: #666;
+      --off-btn: #555;
+      --shadow: rgba(0,0,0,0.1);
+    }
+    body.dark {
+      --bg: #121212;
+      --text: #eaeaea;
+      --card-bg: #1e1e1e;
+      --meta: #aaa;
+      --off-btn: #777;
+      --shadow: rgba(0,0,0,0.6);
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial;
+      margin: 16px;
+      background: var(--bg);
+      color: var(--text);
+      transition: background 0.3s, color 0.3s;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill,minmax(260px,1fr));
+      gap: 12px;
+    }
+    .card {
+      border-radius: 12px;
+      box-shadow: 0 6px 18px var(--shadow);
+      padding: 12px;
+      background: var(--card-bg);
+      transition: background 0.3s, box-shadow 0.3s;
+    }
     .title { font-weight: 600; margin-bottom: 6px; }
-    .meta { color: #666; font-size: 13px; margin-bottom: 8px; }
+    .meta { color: var(--meta); font-size: 13px; margin-bottom: 8px; }
     .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .toggle { padding:8px 12px; border-radius:8px; cursor:pointer; border:none; }
+    .toggle {
+      padding:8px 12px;
+      border-radius:8px;
+      cursor:pointer;
+      border:none;
+      transition: background 0.3s, color 0.3s;
+    }
     .on { background:#0b9; color:white; }
-    .off { background:#555; color:white; }
+    .off { background:var(--off-btn); color:white; }
     input[type=range] { width:100%; }
-    .small { font-size:12px; color:#666; }
+    .small { font-size:12px; color:var(--meta); }
+    .dark-toggle {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      background: var(--card-bg);
+      color: var(--text);
+      box-shadow: 0 4px 10px var(--shadow);
+      transition: background 0.3s, color 0.3s, box-shadow 0.3s;
+    }
   </style>
 </head>
 <body>
+  <button id="darkModeToggle" class="dark-toggle">🌙 Dark Mode</button>
   <h2>WeMo + LIFX devices</h2>
   <p class="small">Auto-discovers every 30s and refreshes every 3s</p>
   <div id="grid" class="grid"></div>
+
 <script>
 async function fetchDevices(){
-  try{
+  try {
     const res = await fetch('/api/devices');
     const data = await res.json();
     render(data.devices);
-  }catch(e){ console.error('fetch error', e); }
+  } catch(e) { console.error('fetch error', e); }
 }
+
 function render(devices){
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
@@ -69,28 +123,75 @@ function render(devices){
     const name=document.createElement('div');name.className='title';name.textContent=d.name;
     const meta=document.createElement('div');meta.className='meta';meta.textContent=(d.model||'')+' · '+(d.ip||'')+' · '+d.type;
     const controls=document.createElement('div');controls.className='controls';
-    const toggle=document.createElement('button');toggle.className='toggle '+(d.state?'on':'off');toggle.textContent=d.state?'On':'Off';
-    toggle.onclick=async()=>{toggle.disabled=true;try{
-      await fetch(`/api/device/${d.uuid}/toggle`,{method:'POST'});
-      await fetchDevices();
-    }catch(e){console.error(e);}finally{toggle.disabled=false;}};
+
+    const toggle=document.createElement('button');
+    toggle.className='toggle '+(d.state?'on':'off');
+    toggle.textContent=d.state?'On':'Off';
+    toggle.onclick=async()=>{
+      toggle.disabled=true;
+      try {
+        await fetch(`/api/device/${d.uuid}/toggle`,{method:'POST'});
+        await fetchDevices();
+      } catch(e){ console.error(e); } 
+      finally { toggle.disabled=false; }
+    };
     controls.appendChild(toggle);
+
     if(d.brightness!==null && d.brightness!==undefined){
       const wrapper=document.createElement('div');wrapper.style.width='100%';
-      const slider=document.createElement('input');slider.type='range';slider.min=0;slider.max=100;slider.value=d.brightness;
-      slider.onchange=async(ev)=>{ try {
-          await fetch(`/api/device/${d.uuid}/brightness`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brightness:Number(ev.target.value)})});
+      const slider=document.createElement('input');
+      slider.type='range';slider.min=0;slider.max=100;slider.value=d.brightness;
+      slider.onchange=async(ev)=>{
+        try {
+          await fetch(`/api/device/${d.uuid}/brightness`,{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({brightness:Number(ev.target.value)})
+          });
           await fetchDevices();
-      } catch(e){ console.error(e); } };
-      const bv=document.createElement('div');bv.className='small';bv.textContent='Brightness: '+d.brightness;
+        } catch(e){ console.error(e); }
+      };
+      const bv=document.createElement('div');
+      bv.className='small';
+      bv.textContent='Brightness: '+d.brightness;
       slider.oninput=(ev)=>{bv.textContent='Brightness: '+ev.target.value;};
-      wrapper.appendChild(slider);wrapper.appendChild(bv);controls.appendChild(wrapper);
+      wrapper.appendChild(slider);
+      wrapper.appendChild(bv);
+      controls.appendChild(wrapper);
     }
-    card.appendChild(name);card.appendChild(meta);card.appendChild(controls);grid.appendChild(card);
+
+    card.appendChild(name);
+    card.appendChild(meta);
+    card.appendChild(controls);
+    grid.appendChild(card);
   });
 }
-fetchDevices();setInterval(fetchDevices,3000);
-</script></body></html>
+
+fetchDevices();
+setInterval(fetchDevices,3000);
+
+// Dark mode toggle logic
+const toggleBtn = document.getElementById('darkModeToggle');
+function applyDarkModeSetting(dark) {
+  if (dark) {
+    document.body.classList.add('dark');
+    toggleBtn.textContent = '☀️ Light Mode';
+  } else {
+    document.body.classList.remove('dark');
+    toggleBtn.textContent = '🌙 Dark Mode';
+  }
+}
+const savedDark = localStorage.getItem('darkMode') === 'true';
+applyDarkModeSetting(savedDark);
+toggleBtn.onclick = () => {
+  const isDark = !document.body.classList.contains('dark');
+  localStorage.setItem('darkMode', isDark);
+  applyDarkModeSetting(isDark);
+};
+</script>
+</body>
+</html>
+
 """
 
 # -----------------------
