@@ -30,7 +30,7 @@ LIFX_CACHE = []  # cached Light objects
 # HTML UI (unchanged)
 # -----------------------
 INDEX_HTML = """<!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>Smart Home Dashboard</title>
@@ -45,7 +45,6 @@ INDEX_HTML = """<!doctype html>
       --shadow: rgba(0,0,0,0.08);
       --accent: #0b9;
       --card-border: #e2e8f0;
-      --hover-scale: 1.02;
     }
 
     body.dark {
@@ -64,7 +63,7 @@ INDEX_HTML = """<!doctype html>
       background: var(--bg);
       color: var(--text);
       margin: 0;
-      padding: 24px;
+      padding: 16px;
       transition: background 0.3s, color 0.3s;
     }
 
@@ -72,11 +71,13 @@ INDEX_HTML = """<!doctype html>
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 24px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 8px;
     }
 
     h2 {
-      font-size: 1.5em;
+      font-size: 1.4em;
       margin: 0;
     }
 
@@ -94,6 +95,7 @@ INDEX_HTML = """<!doctype html>
       cursor: pointer;
       box-shadow: 0 4px 10px var(--shadow);
       transition: all 0.3s;
+      font-size: 14px;
     }
 
     .dark-toggle:hover {
@@ -103,24 +105,24 @@ INDEX_HTML = """<!doctype html>
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 20px;
+      gap: 16px;
     }
 
     .card {
       background: var(--card-bg);
       border-radius: 16px;
-      padding: 20px;
+      padding: 18px;
       box-shadow: 0 6px 20px var(--shadow);
       border: 1px solid var(--card-border);
-      transition: transform 0.3s, box-shadow 0.3s;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
+      transition: transform 0.3s, box-shadow 0.3s;
+      touch-action: pan-y;
     }
 
-    .card:hover {
-      transform: scale(var(--hover-scale));
-      box-shadow: 0 10px 25px var(--shadow);
+    .card:active {
+      transform: scale(0.98);
     }
 
     .title {
@@ -129,7 +131,7 @@ INDEX_HTML = """<!doctype html>
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
     }
 
     .device-icon {
@@ -148,6 +150,7 @@ INDEX_HTML = """<!doctype html>
       color: var(--meta);
       font-size: 13px;
       margin-bottom: 12px;
+      word-break: break-word;
     }
 
     .controls {
@@ -157,12 +160,13 @@ INDEX_HTML = """<!doctype html>
     }
 
     .toggle {
-      padding: 10px 14px;
-      border-radius: 8px;
+      padding: 12px 0;
+      border-radius: 10px;
       cursor: pointer;
       border: none;
-      font-weight: 500;
+      font-weight: 600;
       transition: all 0.25s;
+      font-size: 15px;
     }
 
     .on {
@@ -181,6 +185,7 @@ INDEX_HTML = """<!doctype html>
       width: 100%;
       accent-color: var(--accent);
       cursor: pointer;
+      touch-action: none;
     }
 
     .brightness-wrapper {
@@ -193,6 +198,25 @@ INDEX_HTML = """<!doctype html>
       font-size: 12px;
       color: var(--meta);
       text-align: right;
+    }
+
+    /* Responsive text and spacing for mobile */
+    @media (max-width: 500px) {
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      h2 {
+        font-size: 1.2em;
+      }
+      .dark-toggle {
+        font-size: 13px;
+        padding: 6px 12px;
+      }
+      .grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
     }
   </style>
 </head>
@@ -226,6 +250,18 @@ function render(devices) {
     const card = document.createElement('div');
     card.className = 'card';
 
+    // Device swipe toggle
+    let startX = 0;
+    card.addEventListener('touchstart', e => {
+      startX = e.touches[0].clientX;
+    });
+    card.addEventListener('touchend', async e => {
+      const endX = e.changedTouches[0].clientX;
+      if (Math.abs(endX - startX) > 60) {
+        await toggleDevice(d.uuid);
+      }
+    });
+
     const name = document.createElement('div');
     name.className = 'title';
     const icon = document.createElement('div');
@@ -244,17 +280,7 @@ function render(devices) {
     const toggle = document.createElement('button');
     toggle.className = 'toggle ' + (d.state ? 'on' : 'off');
     toggle.textContent = d.state ? 'On' : 'Off';
-    toggle.onclick = async () => {
-      toggle.disabled = true;
-      try {
-        await fetch(`/api/device/${d.uuid}/toggle`, { method: 'POST' });
-        await fetchDevices();
-      } catch (e) {
-        console.error(e);
-      } finally {
-        toggle.disabled = false;
-      }
-    };
+    toggle.onclick = async () => await toggleDevice(d.uuid);
     controls.appendChild(toggle);
 
     if (d.brightness !== null && d.brightness !== undefined) {
@@ -298,6 +324,15 @@ function render(devices) {
     card.appendChild(controls);
     grid.appendChild(card);
   });
+}
+
+async function toggleDevice(uuid) {
+  try {
+    await fetch(`/api/device/${uuid}/toggle`, { method: 'POST' });
+    await fetchDevices();
+  } catch (e) {
+    console.error(e);
+  }
 }
 
 fetchDevices();
@@ -533,19 +568,28 @@ def api_toggle(udn):
             print("toggle:lifx")
             try:
                 cur_power = dev.get_power()
+                print(f"cur_power:{cur_power}")
                 new_power = 0 if cur_power and cur_power > 0 else 65535
+                print(f"new_power:{new_power}")
                 dev.set_power(new_power, rapid=True)
+                print(f"power set{dev.get_power()}")
             except TypeError:
                 # some lifxlan versions use signature set_power(power, duration)
                 try:
+                    print(f"except setPower")
                     dev.set_power(new_power)
                 except Exception:
                     dev.set_power(65535)
             # optimistic update
             with DEVICES_LOCK:
                 print(f"lifx optimistic update..")
+                
+                #delay so that lifx reports correct value not transient
+                time.sleep(0.5)
+                print(f"dev.get_power():{dev.get_power()}, 1 if dev.get_power() and dev.get_power() > 0 else 0:{1 if dev.get_power() and dev.get_power() > 0 else 0}")
                 DEVICES[udn]['state'] = 1 if dev.get_power() and dev.get_power() > 0 else 0
                 DEVICES[udn]['last_seen'] = time.time()
+                print(f"device updated:{DEVICES[udn]['state']}")
         else:
             raise RuntimeError("Unknown device type")
     except Exception as e:
