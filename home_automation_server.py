@@ -235,7 +235,7 @@ INDEX_HTML = """<!doctype html>
 <script>
 async function fetchDevices() {
   try {
-    const res = await fetch('/api/devices');
+    const res = await fetch('api/devices');
     const data = await res.json();
     render(data.devices);
   } catch (e) {
@@ -303,7 +303,7 @@ function render(devices) {
 
       slider.onchange = async (ev) => {
         try {
-          await fetch(`/api/device/${d.uuid}/brightness`, {
+          await fetch(`api/device/${d.uuid}/brightness`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ brightness: Number(ev.target.value) })
@@ -328,7 +328,7 @@ function render(devices) {
 
 async function toggleDevice(uuid) {
   try {
-    await fetch(`/api/device/${uuid}/toggle`, { method: 'POST' });
+    await fetch(`api/device/${uuid}/toggle`, { method: 'POST' });
     await fetchDevices();
   } catch (e) {
     console.error(e);
@@ -583,7 +583,7 @@ def api_toggle(udn):
             # optimistic update
             with DEVICES_LOCK:
                 print(f"lifx optimistic update..")
-                
+
                 #delay so that lifx reports correct value not transient
                 time.sleep(0.5)
                 print(f"dev.get_power():{dev.get_power()}, 1 if dev.get_power() and dev.get_power() > 0 else 0:{1 if dev.get_power() and dev.get_power() > 0 else 0}")
@@ -656,10 +656,32 @@ def api_brightness(udn):
     return jsonify({'ok': True})
 
 
+
+def start_background_discovery():
+    """Start the background discovery thread once."""
+    if not getattr(app, "_discovery_started", False):
+        Thread(target=discover_all, daemon=True).start()
+        app._discovery_started = True
+        print("Background discovery thread started.")
+    else:
+        print("Background discovery thread already running.")
+
+
+# Only run this when imported by Gunicorn or started directly
+start_background_discovery()
+
+if __name__ == '__main__':
+    print("Smart Home server running at http://0.0.0.0:5001")
+    app.run(host='0.0.0.0', port=5001)
+
+
+
+
+
 # ---------------------
 # Start background discovery and run server
 # ---------------------
-if __name__ == '__main__':
-    Thread(target=discover_all, daemon=True).start()
-    print("Smart Home server running at http://0.0.0.0:5001")
-    app.run(host='0.0.0.0', port=5001)
+#if __name__ == '__main__':
+#    Thread(target=discover_all, daemon=True).start()
+#    print("Smart Home server running at http://0.0.0.0:5001")
+#    app.run(host='0.0.0.0', port=5001)
