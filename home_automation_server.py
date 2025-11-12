@@ -14,9 +14,30 @@ from flask import Flask, jsonify, request, render_template_string, abort
 import pywemo
 from lifxlan import LifxLAN
 
+# cloud version
+import asyncio
+import os
+import inspect
+
+from tapo import ApiClient, DiscoveryResult
+
+from dotenv import load_dotenv
+
+
+# Tapo login credentials (replace these)
+load_dotenv()          # loads .env into os.environ
+tapo_username = os.getenv("TAPO_EMAIL")
+tapo_password = os.getenv("TAPO_PASSWORD")
+
+
+# create main flask app
 app = Flask(__name__)
 
-DEVICES = {}           # { uuid: { 'device': obj, 'type': 'wemo'|'lifx', ... } }
+TAPO_CLIENT = ApiClient(tapo_username, tapo_password)
+TAPO_CACHE = []  # holds discovered Tapo devices
+
+
+DEVICES = {}    # { uuid: { 'device': obj, 'type': 'wemo'|'lifx', ... } }
 DEVICES_LOCK = Lock()
 
 DISCOVERY_INTERVAL = 30  # seconds
@@ -24,6 +45,25 @@ DISCOVERY_INTERVAL = 30  # seconds
 # Reuse LifxLAN instance (faster than creating repeatedly)
 LIFX_LAN = LifxLAN()
 LIFX_CACHE = []  # cached Light objects
+
+
+def sort_devices(devices: dict) -> None:
+    """
+    Sorts a devices dictionary by type then by name (case-insensitive).
+    Updates the given dictionary in place.
+    """
+    # Create a sorted list of (key, value) pairs
+    sorted_items = sorted(
+        devices.items(),
+        key=lambda item: (
+            item[1].get('type', '').lower(),
+            item[1].get('name', '').lower()
+        )
+    )
+
+    # Clear and repopulate the dict (preserves the same object)
+    devices.clear()
+    devices.update(sorted_items)
 
 
 # -----------------------
@@ -146,6 +186,44 @@ INDEX_HTML = """<!doctype html>
       font-size: 12px;
     }
 
+
+    .device-icon.tapo {
+      background: #0078ff; /* blue */
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 12px;
+    }
+
+    .device-icon.wemo {
+      background: #00c853; /* green */
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 12px;
+    }
+
+    .device-icon.lifx {
+      background: #b100ff; /* purple */
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 12px;
+    }
+
+
     .meta {
       color: var(--meta);
       font-size: 13px;
@@ -265,7 +343,8 @@ function render(devices) {
     const name = document.createElement('div');
     name.className = 'title';
     const icon = document.createElement('div');
-    icon.className = 'device-icon';
+    /*icon.className = 'device-icon';*/
+    icon.className = `device-icon ${d.type?.toLowerCase() || ''}`;
     icon.textContent = d.type?.[0]?.toUpperCase() || '•';
     name.appendChild(icon);
     name.appendChild(document.createTextNode(d.name));
@@ -366,6 +445,7 @@ toggleBtn.onclick = () => {
 # Discovery helpers
 # -----------------------
 
+
 def safe_get_device_udn(dev):
     """Return a stable id for a device object (works for pywemo and lifx placeholders)."""
     # pywemo devices: 'udn' sometimes present, otherwise use serial_number or host
@@ -443,6 +523,7 @@ def discover_wemo():
 def discover_lifx():
     """Discover LIFX lights (re-uses global LIFX_LAN and updates LIFX_CACHE)."""
     global LIFX_CACHE
+    global DEVICES
     try:
         lights = LIFX_LAN.get_lights()
     except Exception as e:
@@ -482,17 +563,158 @@ def discover_lifx():
             except Exception as e:
                 # don't let one bad light stop processing
                 print("LIFX per-device error:", e)
+        # order the DEVICES dictionary by type then by name
+        # DEVICES = dict(sorted(DEVICES.items(),key=lambda item: (item[1].get('type', ''), item[1].get('name', ''))))
+        DEVICES = dict(
+            sorted(
+                DEVICES.items(),
+                    key=lambda item: (
+                        item[1].get('type', '').lower(),
+                        item[1].get('name', '').lower()
+                        )
+                    )
+                )
 
+
+
+async def discover_tapo():
+    """Discover Tapo devices locally using LAN control."""
+    global DEVICES
+
+    tapo_username = "john.jencek@yahoo.com.au"
+    tapo_password = "Vimbar123#"
+    target = "192.168.1.255"
+    timeout_s = int(os.getenv("TIMEOUT", 10))
+
+    print(f"Discovering Tapo devices on target: {target} for {timeout_s} seconds...")
+
+    api_client = ApiClient(tapo_username, tapo_password)
+    discovery = await api_client.discover_devices(target, timeout_s)
+
+    TAPO_CACHE.clear()
+
+    async for discovery_result in discovery:
+        try:
+            device = discovery_result.get()
+            # print(f"device type: {type(device)}")
+            # print(f"dir {dir(device)}")
+
+            # print("*** List members***")
+            # for name, member in inspect.getmembers(device):
+            #    print(name, "→", type(member))
+            # print(">>> List members <<<")
+
+
+
+            match device:
+                case DiscoveryResult.GenericDevice(device_info, _handler):
+                    print(
+                        f"Found Unsupported Device '{device_info.nickname}' of model '{device_info.model}' at IP address '{device_info.ip}'."
+                    )
+                case DiscoveryResult.Light(device_info, _handler):
+                    # print(
+                    #    f"Found '{device_info.nickname}' of model '{device_info.model}' at IP address '{device_info.ip}'."
+                    # )
+                    TAPO_CACHE.append(device)
+                    # print(f"light on")
+                    # await device.handler.on()
+
+                case DiscoveryResult.ColorLight(device_info, _handler):
+                    #print(
+                    #    f"Found '{device_info.nickname}' of model '{device_info.model}' at IP address '{device_info.ip}'."
+
+                    # )
+                    TAPO_CACHE.append(device)
+                    # print(f"colour light on")
+                    #await device.handler.on()
+
+                case DiscoveryResult.RgbLightStrip(device_info, _handler):
+                    print(
+                        f"Found '{device_info.nickname}' of model '{device_info.model}' at IP address '{device_info.ip}'."
+                    )
+                case DiscoveryResult.RgbicLightStrip(device_info, _handler):
+                    print(
+                        f"Found '{device_info.nickname}' of model '{device_info.model}' at IP address '{device_info.ip}'."
+                    )
+                case DiscoveryResult.Plug(device_info, _handler):
+                    print(
+                        f"Found '{device_info.nickname}' of model '{device_info.model}' at IP address '{device_info.ip}'."
+                    )
+                case DiscoveryResult.PlugEnergyMonitoring(device_info, _handler):
+                    print(
+                        f"Found '{device_info.nickname}' of model '{device_info.model}' at IP address '{device_info.ip}'."
+                    )
+                case DiscoveryResult.PowerStrip(device_info, _handler):
+                    print(
+                        f"Found Power Strip of model '{device_info.model}' at IP address '{device_info.ip}'."
+                    )
+                case DiscoveryResult.PowerStripEnergyMonitoring(device_info, _handler):
+                    print(
+                        f"Found Power Strip with Energy Monitoring of model '{device_info.model}' at IP address '{device_info.ip}'."
+                    )
+                case DiscoveryResult.Hub(device_info, _handler):
+                    print(
+                        f"Found '{device_info.nickname}' of model '{device_info.model}' at IP address '{device_info.ip}'."
+                    )
+        except Exception as e:
+            print(f"Error discovering device: {e}")
+
+    # Add to the main device buffer
+    now = time.time()
+    for d in TAPO_CACHE:
+        try:
+            # print(type(d))
+            # # if "tapo" in info.get("deviceType", "").lower() or info.get("model"):
+            # print(type(d))
+            # print(f"device type: {type(device)}")
+            # print(f"dir {dir(device)}")
+
+            # print("*** List members***")
+            # for name, member in inspect.getmembers(device):
+            #     print(name, "→", type(member))
+            # print(">>> List members <<<")
+
+            # print(f"ip: {d.device_info.ip}")
+            # print(f"model {d.device_info.model}")
+            # print(f"nickname: {d.device_info.nickname}")
+            # print(f"brightness: {d.device_info.brightness}")
+            # print(f"mac: {d.device_info.mac}")
+            # print(f"device_on: {d.device_info.device_on}")
+            # print(dir(d.device_info))
+
+
+            udn = "tapo-" + d.device_info.mac
+            with DEVICES_LOCK:
+                DEVICES[udn] = {
+                    'uuid': udn,
+                    'device': d,
+                    'name': d.device_info.nickname,
+                    'model': d.device_info.model,
+                    'type': 'tapo',
+                    'ip': d.device_info.ip,
+                    'state': 1 if d.device_info.device_on is True else 0,
+                    'brightness': d.device_info.brightness,
+                    'last_seen': now
+                }
+            print(f"Discovered Tapo device at {d.device_info.ip}: {d.device_info.nickname}: state:{d.device_info.device_on}, brightness: {d.device_info.brightness}")
+        except Exception:
+            continue
+
+def run_async_tapo_discover():
+    asyncio.run(discover_tapo())
 
 def discover_all():
-    """Run both discoveries in parallel and sleep DISCOVERY_INTERVAL."""
+    """Run all discoveries in parallel and sleep DISCOVERY_INTERVAL."""
     while True:
         t1 = Thread(target=discover_wemo, daemon=True)
         t2 = Thread(target=discover_lifx, daemon=True)
+        t3 = Thread(target=run_async_tapo_discover, daemon=True)
         t1.start()
         t2.start()
+        t3.start()
         t1.join()
         t2.join()
+        t3.join()
         time.sleep(DISCOVERY_INTERVAL)
 
 
@@ -590,12 +812,37 @@ def api_toggle(udn):
                 DEVICES[udn]['state'] = 1 if dev.get_power() and dev.get_power() > 0 else 0
                 DEVICES[udn]['last_seen'] = time.time()
                 print(f"device updated:{DEVICES[udn]['state']}")
+
+        elif dtype == 'tapo':
+            try:
+                print("toggling tapo")
+                dev = info['device']
+                cur_info = dev.device_info
+                print(f"cur_state: {cur_info.device_on}")
+
+                new_state = not cur_info.device_on
+                print(f"new state: {new_state}")
+
+                if new_state is True:
+                    print("turn on")
+                    asyncio.run(dev.handler.on())
+                else:
+                    asyncio.run(dev.handler.off())
+                    print("turn off ")
+
+                with DEVICES_LOCK:
+                    DEVICES[udn]['state'] = 1 if new_state else 0
+                    DEVICES[udn]['last_seen'] = time.time()
+            except Exception as e:
+                return jsonify({'error': f'Tapo toggle failed: {e}'}), 500
+
         else:
             raise RuntimeError("Unknown device type")
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-    # small delay to allow device to apply state (helps when UI fetches immediately)
+    # small delay to allow device to apply state (helps when UI fetches 
+    # immediately
     time.sleep(0.3)
     return jsonify({'ok': True})
 
@@ -646,6 +893,19 @@ def api_brightness(udn):
                     DEVICES[udn]['last_seen'] = time.time()
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
+
+        elif dtype == 'tapo':
+            try:
+                dev = info['device']
+                print(f"set brightness: {b}")
+                asyncio.run(dev.handler.set_brightness(b))
+
+                with DEVICES_LOCK:
+                    DEVICES[udn]['brightness'] = b
+                    DEVICES[udn]['last_seen'] = time.time()
+            except Exception as e:
+                return jsonify({'error': f'Tapo brightness failed: {e}'}), 500
+
         else:
             return jsonify({'error': 'unknown device type'}), 400
     except Exception as e:
@@ -654,7 +914,6 @@ def api_brightness(udn):
     # slight delay so immediate UI refresh sees updated cached values
     time.sleep(0.2)
     return jsonify({'ok': True})
-
 
 
 def start_background_discovery():
@@ -675,13 +934,10 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)
 
 
-
-
-
 # ---------------------
 # Start background discovery and run server
 # ---------------------
-#if __name__ == '__main__':
+# if __name__ == '__main__':
 #    Thread(target=discover_all, daemon=True).start()
 #    print("Smart Home server running at http://0.0.0.0:5001")
 #    app.run(host='0.0.0.0', port=5001)
