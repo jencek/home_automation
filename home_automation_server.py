@@ -581,10 +581,8 @@ async def discover_tapo():
     """Discover Tapo devices locally using LAN control."""
     global DEVICES
 
-    tapo_username = "john.jencek@yahoo.com.au"
-    tapo_password = "Vimbar123#"
     target = "192.168.1.255"
-    timeout_s = int(os.getenv("TIMEOUT", 10))
+    timeout_s = int(os.getenv("TIMEOUT", 20))
 
     print(f"Discovering Tapo devices on target: {target} for {timeout_s} seconds...")
 
@@ -694,9 +692,13 @@ async def discover_tapo():
                     'ip': d.device_info.ip,
                     'state': 1 if d.device_info.device_on is True else 0,
                     'brightness': d.device_info.brightness,
-                    'last_seen': now
+                    'last_seen': now,
+                    'hue': d.device_info.hue,
+                    'saturation': d.device_info.saturation,
                 }
-            print(f"Discovered Tapo device at {d.device_info.ip}: {d.device_info.nickname}: state:{d.device_info.device_on}, brightness: {d.device_info.brightness}")
+            print(f"Discovered Tapo device at {d.device_info.ip}: "
+                f"{d.device_info.nickname}: state:{d.device_info.device_on}, "
+                f"brightness: {d.device_info.brightness}, hue: {d.device_info.hue}, saturation: {d.device_info.saturation}")
         except Exception:
             continue
 
@@ -914,6 +916,55 @@ def api_brightness(udn):
     # slight delay so immediate UI refresh sees updated cached values
     time.sleep(0.2)
     return jsonify({'ok': True})
+
+
+@app.route('/api/device/<udn>/hue', methods=['POST'])
+def api_hue(udn):
+    data = request.get_json(force=True)
+    if 'hue' not in data:
+        return jsonify({'error': 'hue required'}), 400
+    try:
+        b = int(float(data['hue']))
+    except Exception:
+        return jsonify({'error': 'invalid hue value'}), 400
+
+    # clamp
+    b = max(0, min(360, b))
+
+    with DEVICES_LOCK:
+        info = DEVICES.get(udn)
+    if not info:
+        abort(404)
+
+    dev = info['device']
+    dtype = info['type']
+
+    try:
+        if dtype == 'tapo':
+            try:
+                dev = info['device']
+                print(f"set hue: {b}")
+
+                # hue and saturation are set together. get the current 
+                # saturation
+                cur_saturation = DEVICES[udn]['saturation']
+                asyncio.run(dev.handler.set_hue_saturation(b, cur_saturation)) 
+
+                with DEVICES_LOCK:
+                    DEVICES[udn]['hue'] = b
+                    DEVICES[udn]['last_seen'] = time.time()
+            except Exception as e:
+                return jsonify({'error': f'Tapo hue failed: {e}'}), 500
+
+        else:
+            return jsonify({'error': 'unknown device type'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    # slight delay so immediate UI refresh sees updated cached values
+    time.sleep(0.2)
+    return jsonify({'ok': True})
+
 
 
 def start_background_discovery():
