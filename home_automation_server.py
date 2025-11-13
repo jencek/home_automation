@@ -46,17 +46,21 @@ LIFX_LAN = LifxLAN()
 LIFX_CACHE = []  # cached Light objects
 
 
+
 def sort_devices(devices: dict) -> None:
     """
-    Sorts a devices dictionary by type then by name (case-insensitive).
+    Sorts a devices dictionary by type (LIFX → Wemo → Tapo) and then by name (case-insensitive).
     Updates the given dictionary in place.
     """
+    # Define a custom type order
+    type_order = {"lifx": 0, "wemo": 1, "tapo": 2}
+
     # Create a sorted list of (key, value) pairs
     sorted_items = sorted(
         devices.items(),
         key=lambda item: (
-            item[1].get('type', '').lower(),
-            item[1].get('name', '').lower()
+            type_order.get(item[1].get("type", "").lower(), 99),  # Unknown types last
+            item[1].get("name", "").lower()
         )
     )
 
@@ -330,6 +334,8 @@ INDEX_HTML = """<!doctype html>
 
   <div id="grid" class="grid"></div>
 
+
+
 <script>
 async function fetchDevices() {
   try {
@@ -340,22 +346,24 @@ async function fetchDevices() {
     console.error('fetch error', e);
   }
 }
-//-- new
+
 function render(devices) {
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
+
   devices.forEach(d => {
     const card = document.createElement('div');
     card.className = 'card';
 
-    // Swipe gesture toggle
+    // Swipe to toggle
     let startX = 0;
-    card.addEventListener('touchstart', e => startX = e.touches[0].clientX);
+    card.addEventListener('touchstart', e => (startX = e.touches[0].clientX));
     card.addEventListener('touchend', async e => {
       const endX = e.changedTouches[0].clientX;
       if (Math.abs(endX - startX) > 60) await toggleDevice(d.uuid);
     });
 
+    // Title + icon
     const name = document.createElement('div');
     name.className = 'title';
     const icon = document.createElement('div');
@@ -364,112 +372,43 @@ function render(devices) {
     name.appendChild(icon);
     name.appendChild(document.createTextNode(d.name));
 
+    // Meta
     const meta = document.createElement('div');
     meta.className = 'meta';
     meta.textContent = `${d.model || ''} · ${d.ip || ''} · ${d.type}`;
 
+    // Controls container
     const controls = document.createElement('div');
     controls.className = 'controls';
 
+    // Toggle button
     const toggle = document.createElement('button');
     toggle.className = 'toggle ' + (d.state ? 'on' : 'off');
     toggle.textContent = d.state ? 'On' : 'Off';
     toggle.onclick = async () => await toggleDevice(d.uuid);
     controls.appendChild(toggle);
 
-    // ---- Brightness (all devices that support it)
+    // Brightness slider
     if (d.brightness !== null && d.brightness !== undefined) {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'brightness-wrapper';
-
-      const slider = document.createElement('input');
-      slider.type = 'range';
-      slider.min = 0;
-      slider.max = 100;
-      slider.value = d.brightness;
-
-      const label = document.createElement('div');
-      label.className = 'brightness-label';
-      label.textContent = `Brightness: ${d.brightness}`;
-
-      slider.oninput = ev => label.textContent = `Brightness: ${ev.target.value}`;
-      slider.onchange = async ev => {
-        try {
-          await fetch(`api/device/${d.uuid}/brightness`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ brightness: Number(ev.target.value) })
-          });
-          await fetchDevices();
-        } catch (e) { console.error(e); }
-      };
-
-      wrapper.appendChild(slider);
-      wrapper.appendChild(label);
-      controls.appendChild(wrapper);
+      controls.appendChild(
+        makeSlider('Brightness', d.brightness, 0, 100, async val =>
+          postValue(d.uuid, 'brightness', val)
+        )
+      );
     }
 
-    // ---- Hue and Saturation (Tapo only)
-    if (d.type === 'tapo') {
-      // Hue
-      const hueWrapper = document.createElement('div');
-      hueWrapper.className = 'hue-wrapper';
-
-      const hueSlider = document.createElement('input');
-      hueSlider.type = 'range';
-      hueSlider.min = 0;
-      hueSlider.max = 360;
-      hueSlider.value = d.hue ?? 0;
-
-      const hueLabel = document.createElement('div');
-      hueLabel.className = 'hue-label';
-      hueLabel.textContent = `Hue: ${hueSlider.value}`;
-
-      hueSlider.oninput = ev => hueLabel.textContent = `Hue: ${ev.target.value}`;
-      hueSlider.onchange = async ev => {
-        try {
-          await fetch(`api/device/${d.uuid}/hue`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ hue: Number(ev.target.value) })
-          });
-          await fetchDevices();
-        } catch (e) { console.error(e); }
-      };
-
-      hueWrapper.appendChild(hueSlider);
-      hueWrapper.appendChild(hueLabel);
-      controls.appendChild(hueWrapper);
-
-      // Saturation
-      const satWrapper = document.createElement('div');
-      satWrapper.className = 'saturation-wrapper';
-
-      const satSlider = document.createElement('input');
-      satSlider.type = 'range';
-      satSlider.min = 0;
-      satSlider.max = 100;
-      satSlider.value = d.saturation ?? 100;
-
-      const satLabel = document.createElement('div');
-      satLabel.className = 'saturation-label';
-      satLabel.textContent = `Saturation: ${satSlider.value}`;
-
-      satSlider.oninput = ev => satLabel.textContent = `Saturation: ${ev.target.value}`;
-      satSlider.onchange = async ev => {
-        try {
-          await fetch(`api/device/${d.uuid}/saturation`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ saturation: Number(ev.target.value) })
-          });
-          await fetchDevices();
-        } catch (e) { console.error(e); }
-      };
-
-      satWrapper.appendChild(satSlider);
-      satWrapper.appendChild(satLabel);
-      controls.appendChild(satWrapper);
+    // Hue + Saturation for TAPO
+    if (d.type && d.type.toLowerCase() === 'tapo' && d.model == 'L530' ) {
+      controls.appendChild(
+        makeHueSlider('Hue', d.hue ?? 180, 0, 360, async val =>
+          postValue(d.uuid, 'hue', val)
+        )
+      );
+      controls.appendChild(
+        makeSlider('Saturation', d.saturation ?? 100, 0, 100, async val =>
+          postValue(d.uuid, 'saturation', val)
+        )
+      );
     }
 
     card.appendChild(name);
@@ -478,8 +417,90 @@ function render(devices) {
     grid.appendChild(card);
   });
 }
-//-- new
 
+// ---------- Generic Slider ----------
+function makeSlider(labelText, initialValue, min, max, onChange) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'brightness-wrapper';
+
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = min;
+  slider.max = max;
+  slider.value = initialValue;
+
+  const label = document.createElement('div');
+  label.className = 'brightness-label';
+  label.textContent = `${labelText}: ${initialValue}`;
+
+  slider.oninput = e => (label.textContent = `${labelText}: ${e.target.value}`);
+  slider.onchange = async e => {
+    try {
+      await onChange(Number(e.target.value));
+      await fetchDevices();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  wrapper.appendChild(slider);
+  wrapper.appendChild(label);
+  return wrapper;
+}
+
+// ---------- Hue Slider with Preview ----------
+function makeHueSlider(labelText, initialValue, min, max, onChange) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'brightness-wrapper';
+
+  const label = document.createElement('div');
+  label.className = 'brightness-label';
+  label.textContent = `${labelText}: ${initialValue}°`;
+
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = min;
+  slider.max = max;
+  slider.value = initialValue;
+  slider.style.marginBottom = '4px';
+
+  const preview = document.createElement('div');
+  preview.style.height = '10px';
+  preview.style.borderRadius = '5px';
+  preview.style.background = `hsl(${initialValue}, 100%, 50%)`;
+  preview.style.transition = 'background 0.2s linear';
+
+  slider.oninput = e => {
+    const val = e.target.value;
+    label.textContent = `${labelText}: ${val}°`;
+    preview.style.background = `hsl(${val}, 100%, 50%)`;
+  };
+
+  slider.onchange = async e => {
+    try {
+      await onChange(Number(e.target.value));
+      await fetchDevices();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  wrapper.appendChild(slider);
+  wrapper.appendChild(preview);
+  wrapper.appendChild(label);
+  return wrapper;
+}
+
+// ---------- Helper: POST value ----------
+async function postValue(uuid, key, value) {
+  await fetch(`api/device/${uuid}/${key}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ [key]: value })
+  });
+}
+
+// ---------- Toggle ----------
 async function toggleDevice(uuid) {
   try {
     await fetch(`api/device/${uuid}/toggle`, { method: 'POST' });
@@ -489,10 +510,11 @@ async function toggleDevice(uuid) {
   }
 }
 
+// ---------- Init ----------
 fetchDevices();
 setInterval(fetchDevices, 3000);
 
-// Dark mode toggle logic
+// ---------- Dark mode toggle ----------
 const toggleBtn = document.getElementById('darkModeToggle');
 function applyDarkModeSetting(dark) {
   if (dark) {
@@ -593,6 +615,7 @@ def discover_wemo():
                 'ip': getattr(dev, 'host', None),
                 'last_seen': now
             }
+        sort_devices(DEVICES)
 
 
 def discover_lifx():
@@ -638,18 +661,8 @@ def discover_lifx():
             except Exception as e:
                 # don't let one bad light stop processing
                 print("LIFX per-device error:", e)
-        # order the DEVICES dictionary by type then by name
-        # DEVICES = dict(sorted(DEVICES.items(),key=lambda item: (item[1].get('type', ''), item[1].get('name', ''))))
-        DEVICES = dict(
-            sorted(
-                DEVICES.items(),
-                    key=lambda item: (
-                        item[1].get('type', '').lower(),
-                        item[1].get('name', '').lower()
-                        )
-                    )
-                )
 
+        sort_devices(DEVICES)
 
 
 async def discover_tapo():
@@ -736,26 +749,6 @@ async def discover_tapo():
     now = time.time()
     for d in TAPO_CACHE:
         try:
-            # print(type(d))
-            # # if "tapo" in info.get("deviceType", "").lower() or info.get("model"):
-            # print(type(d))
-            # print(f"device type: {type(device)}")
-            # print(f"dir {dir(device)}")
-
-            # print("*** List members***")
-            # for name, member in inspect.getmembers(device):
-            #     print(name, "→", type(member))
-            # print(">>> List members <<<")
-
-            # print(f"ip: {d.device_info.ip}")
-            # print(f"model {d.device_info.model}")
-            # print(f"nickname: {d.device_info.nickname}")
-            # print(f"brightness: {d.device_info.brightness}")
-            # print(f"mac: {d.device_info.mac}")
-            # print(f"device_on: {d.device_info.device_on}")
-            # print(dir(d.device_info))
-
-
             udn = "tapo-" + d.device_info.mac
             with DEVICES_LOCK:
                 DEVICES[udn] = {
@@ -771,6 +764,8 @@ async def discover_tapo():
                     'hue': None if not hasattr(d.device_info,'hue') else d.device_info.hue,
                     'saturation': None  if not hasattr(d.device_info,'saturation') else d.device_info.saturation,
                 }
+                sort_devices(DEVICES)
+
             print(f"Discovered Tapo device at {d.device_info.ip}: "
                 f"{d.device_info.nickname}: state:{d.device_info.device_on}, "
                 f"brightness: {d.device_info.brightness}, hue: {0 if not hasattr(d.device_info,'hue') else d.device_info.hue},"
@@ -914,9 +909,11 @@ def api_toggle(udn):
                 print("toggling tapo")
                 dev = info['device']
                 cur_info = dev.device_info
+
                 print(f"cur_state: {cur_info.device_on}")
 
-                new_state = not cur_info.device_on
+                # new_state = not cur_info.device_on
+                new_state = not info['state']
                 print(f"new state: {new_state}")
 
                 if new_state is True:
@@ -927,8 +924,12 @@ def api_toggle(udn):
                     print("turn off ")
 
                 with DEVICES_LOCK:
+                    print("updating in DEVICES_LOCK")
                     DEVICES[udn]['state'] = 1 if new_state else 0
                     DEVICES[udn]['last_seen'] = time.time()
+                    print(f"DEVICES[udn]['state'] set to { DEVICES[udn]['state'] }")
+
+
             except Exception as e:
                 return jsonify({'error': f'Tapo toggle failed: {e}'}), 500
 
