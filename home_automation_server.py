@@ -20,7 +20,6 @@ import os
 import inspect
 
 from tapo import ApiClient, DiscoveryResult
-
 from dotenv import load_dotenv
 
 
@@ -40,7 +39,7 @@ TAPO_CACHE = []  # holds discovered Tapo devices
 DEVICES = {}    # { uuid: { 'device': obj, 'type': 'wemo'|'lifx', ... } }
 DEVICES_LOCK = Lock()
 
-DISCOVERY_INTERVAL = 30  # seconds
+DISCOVERY_INTERVAL = 20  # seconds
 
 # Reuse LifxLAN instance (faster than creating repeatedly)
 LIFX_LAN = LifxLAN()
@@ -296,7 +295,28 @@ INDEX_HTML = """<!doctype html>
         gap: 12px;
       }
     }
+
+
   </style>
+
+  <style>
+  /* ... existing styles ... */
+
+  .hue-wrapper,
+  .saturation-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .hue-label,
+  .saturation-label {
+    font-size: 12px;
+    color: var(--meta);
+    text-align: right;
+  }
+</style>
+
 </head>
 
 <body>
@@ -320,7 +340,7 @@ async function fetchDevices() {
     console.error('fetch error', e);
   }
 }
-
+//-- new
 function render(devices) {
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
@@ -328,22 +348,17 @@ function render(devices) {
     const card = document.createElement('div');
     card.className = 'card';
 
-    // Device swipe toggle
+    // Swipe gesture toggle
     let startX = 0;
-    card.addEventListener('touchstart', e => {
-      startX = e.touches[0].clientX;
-    });
+    card.addEventListener('touchstart', e => startX = e.touches[0].clientX);
     card.addEventListener('touchend', async e => {
       const endX = e.changedTouches[0].clientX;
-      if (Math.abs(endX - startX) > 60) {
-        await toggleDevice(d.uuid);
-      }
+      if (Math.abs(endX - startX) > 60) await toggleDevice(d.uuid);
     });
 
     const name = document.createElement('div');
     name.className = 'title';
     const icon = document.createElement('div');
-    /*icon.className = 'device-icon';*/
     icon.className = `device-icon ${d.type?.toLowerCase() || ''}`;
     icon.textContent = d.type?.[0]?.toUpperCase() || '•';
     name.appendChild(icon);
@@ -362,6 +377,7 @@ function render(devices) {
     toggle.onclick = async () => await toggleDevice(d.uuid);
     controls.appendChild(toggle);
 
+    // ---- Brightness (all devices that support it)
     if (d.brightness !== null && d.brightness !== undefined) {
       const wrapper = document.createElement('div');
       wrapper.className = 'brightness-wrapper';
@@ -376,11 +392,8 @@ function render(devices) {
       label.className = 'brightness-label';
       label.textContent = `Brightness: ${d.brightness}`;
 
-      slider.oninput = (ev) => {
-        label.textContent = `Brightness: ${ev.target.value}`;
-      };
-
-      slider.onchange = async (ev) => {
+      slider.oninput = ev => label.textContent = `Brightness: ${ev.target.value}`;
+      slider.onchange = async ev => {
         try {
           await fetch(`api/device/${d.uuid}/brightness`, {
             method: 'POST',
@@ -388,14 +401,75 @@ function render(devices) {
             body: JSON.stringify({ brightness: Number(ev.target.value) })
           });
           await fetchDevices();
-        } catch (e) {
-          console.error(e);
-        }
+        } catch (e) { console.error(e); }
       };
 
       wrapper.appendChild(slider);
       wrapper.appendChild(label);
       controls.appendChild(wrapper);
+    }
+
+    // ---- Hue and Saturation (Tapo only)
+    if (d.type === 'tapo') {
+      // Hue
+      const hueWrapper = document.createElement('div');
+      hueWrapper.className = 'hue-wrapper';
+
+      const hueSlider = document.createElement('input');
+      hueSlider.type = 'range';
+      hueSlider.min = 0;
+      hueSlider.max = 360;
+      hueSlider.value = d.hue ?? 0;
+
+      const hueLabel = document.createElement('div');
+      hueLabel.className = 'hue-label';
+      hueLabel.textContent = `Hue: ${hueSlider.value}`;
+
+      hueSlider.oninput = ev => hueLabel.textContent = `Hue: ${ev.target.value}`;
+      hueSlider.onchange = async ev => {
+        try {
+          await fetch(`api/device/${d.uuid}/hue`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hue: Number(ev.target.value) })
+          });
+          await fetchDevices();
+        } catch (e) { console.error(e); }
+      };
+
+      hueWrapper.appendChild(hueSlider);
+      hueWrapper.appendChild(hueLabel);
+      controls.appendChild(hueWrapper);
+
+      // Saturation
+      const satWrapper = document.createElement('div');
+      satWrapper.className = 'saturation-wrapper';
+
+      const satSlider = document.createElement('input');
+      satSlider.type = 'range';
+      satSlider.min = 0;
+      satSlider.max = 100;
+      satSlider.value = d.saturation ?? 100;
+
+      const satLabel = document.createElement('div');
+      satLabel.className = 'saturation-label';
+      satLabel.textContent = `Saturation: ${satSlider.value}`;
+
+      satSlider.oninput = ev => satLabel.textContent = `Saturation: ${ev.target.value}`;
+      satSlider.onchange = async ev => {
+        try {
+          await fetch(`api/device/${d.uuid}/saturation`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ saturation: Number(ev.target.value) })
+          });
+          await fetchDevices();
+        } catch (e) { console.error(e); }
+      };
+
+      satWrapper.appendChild(satSlider);
+      satWrapper.appendChild(satLabel);
+      controls.appendChild(satWrapper);
     }
 
     card.appendChild(name);
@@ -404,6 +478,7 @@ function render(devices) {
     grid.appendChild(card);
   });
 }
+//-- new
 
 async function toggleDevice(uuid) {
   try {
@@ -589,7 +664,7 @@ async def discover_tapo():
     api_client = ApiClient(tapo_username, tapo_password)
     discovery = await api_client.discover_devices(target, timeout_s)
 
-    TAPO_CACHE.clear()
+    # TAPO_CACHE.clear()
 
     async for discovery_result in discovery:
         try:
@@ -610,9 +685,9 @@ async def discover_tapo():
                         f"Found Unsupported Device '{device_info.nickname}' of model '{device_info.model}' at IP address '{device_info.ip}'."
                     )
                 case DiscoveryResult.Light(device_info, _handler):
-                    # print(
-                    #    f"Found '{device_info.nickname}' of model '{device_info.model}' at IP address '{device_info.ip}'."
-                    # )
+                    print(
+                        f"Found '{device_info.nickname}' of model '{device_info.model}' at IP address '{device_info.ip}'."
+                    )
                     TAPO_CACHE.append(device)
                     # print(f"light on")
                     # await device.handler.on()
@@ -693,14 +768,18 @@ async def discover_tapo():
                     'state': 1 if d.device_info.device_on is True else 0,
                     'brightness': d.device_info.brightness,
                     'last_seen': now,
-                    'hue': d.device_info.hue,
-                    'saturation': d.device_info.saturation,
+                    'hue': None if not hasattr(d.device_info,'hue') else d.device_info.hue,
+                    'saturation': None  if not hasattr(d.device_info,'saturation') else d.device_info.saturation,
                 }
             print(f"Discovered Tapo device at {d.device_info.ip}: "
                 f"{d.device_info.nickname}: state:{d.device_info.device_on}, "
-                f"brightness: {d.device_info.brightness}, hue: {d.device_info.hue}, saturation: {d.device_info.saturation}")
-        except Exception:
+                f"brightness: {d.device_info.brightness}, hue: {0 if not hasattr(d.device_info,'hue') else d.device_info.hue},"
+                f" saturation: {0 if not hasattr(d.device_info,'saturation') else d.device_info.saturation}")
+        except Exception as e:
+            print(e)
             continue
+
+    TAPO_CACHE.clear()
 
 def run_async_tapo_discover():
     asyncio.run(discover_tapo())
@@ -736,16 +815,31 @@ def api_devices():
         # Build simple serializable list (exclude 'device' object)
         snapshot = []
         for udn, info in DEVICES.items():
-            snapshot.append({
-                'uuid': info.get('uuid'),
-                'name': info.get('name'),
-                'model': info.get('model'),
-                'type': info.get('type'),
-                'state': info.get('state'),
-                'brightness': info.get('brightness'),
-                'ip': info.get('ip'),
-                'last_seen': info.get('last_seen'),
-            })
+            if info.get("hue") is not None and info.get("saturation") is not None:
+                snapshot.append({
+                    'uuid': info.get('uuid'),
+                    'name': info.get('name'),
+                    'model': info.get('model'),
+                    'type': info.get('type'),
+                    'state': info.get('state'),
+                    'brightness': info.get('brightness'),
+                    'hue': info.get('hue'),
+                    'saturation': info.get('saturation'),
+                    'ip': info.get('ip'),
+                    'last_seen': info.get('last_seen'),
+                })
+
+            else:
+                snapshot.append({
+                    'uuid': info.get('uuid'),
+                    'name': info.get('name'),
+                    'model': info.get('model'),
+                    'type': info.get('type'),
+                    'state': info.get('state'),
+                    'brightness': info.get('brightness'),
+                    'ip': info.get('ip'),
+                    'last_seen': info.get('last_seen'),
+                })
     return jsonify({'devices': snapshot})
 
 
@@ -918,6 +1012,54 @@ def api_brightness(udn):
     return jsonify({'ok': True})
 
 
+@app.route('/api/device/<udn>/saturation', methods=['POST'])
+def api_saturation(udn):
+    data = request.get_json(force=True)
+    if 'saturation' not in data:
+        return jsonify({'error': 'saturation required'}), 400
+    try:
+        b = int(float(data['saturation']))
+    except Exception:
+        return jsonify({'error': 'invalid hue value'}), 400
+
+    # clamp
+    b = max(0, min(100, b))
+
+    with DEVICES_LOCK:
+        info = DEVICES.get(udn)
+    if not info:
+        abort(404)
+
+    dev = info['device']
+    dtype = info['type']
+
+    try:
+        if dtype == 'tapo':
+            try:
+                dev = info['device']
+                print(f"set saturation: {b}")
+
+                # hue and saturation are set together. get the current 
+                # saturation
+                cur_hue = DEVICES[udn]['hue']
+                asyncio.run(dev.handler.set_hue_saturation(cur_hue, b)) 
+
+                with DEVICES_LOCK:
+                    DEVICES[udn]['saturation'] = b
+                    DEVICES[udn]['last_seen'] = time.time()
+            except Exception as e:
+                return jsonify({'error': f'Tapo saturation failed: {e}'}), 500
+
+        else:
+            return jsonify({'error': 'unknown device type'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    # slight delay so immediate UI refresh sees updated cached values
+    time.sleep(0.2)
+    return jsonify({'ok': True})
+
+
 @app.route('/api/device/<udn>/hue', methods=['POST'])
 def api_hue(udn):
     data = request.get_json(force=True)
@@ -964,7 +1106,6 @@ def api_hue(udn):
     # slight delay so immediate UI refresh sees updated cached values
     time.sleep(0.2)
     return jsonify({'ok': True})
-
 
 
 def start_background_discovery():
