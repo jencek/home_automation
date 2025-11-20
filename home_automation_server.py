@@ -873,7 +873,9 @@ def api_toggle(udn):
 
             # optimistic update for cache
             with DEVICES_LOCK:
-                DEVICES[udn]['state'] = 1 if getattr(dev, 'is_on', lambda: None)() else (int(dev.get_state()) if hasattr(dev, 'get_state') else DEVICES[udn].get('state', 1))
+                DEVICES[udn]['state'] = 1 if getattr(dev, 'is_on',
+                                                    lambda: None)() else (int(dev.get_state()) if hasattr(dev, 'get_state') 
+                                                        else DEVICES[udn].get('state', 1))
                 DEVICES[udn]['last_seen'] = time.time()
 
         elif dtype == 'lifx':
