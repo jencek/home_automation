@@ -28,6 +28,8 @@ load_dotenv()          # loads .env into os.environ
 tapo_username = os.getenv("TAPO_EMAIL")
 tapo_password = os.getenv("TAPO_PASSWORD")
 
+# store time at beginning of discovery runs
+discovery_start_time = time.time()
 
 # create main flask app
 app = Flask(__name__)
@@ -571,6 +573,8 @@ def safe_get_device_udn(dev):
 
 def discover_wemo():
     """Discover WeMo devices and update DEVICES (protected by lock)."""
+
+    global discovery_start_time
     try:
         found = pywemo.discover_devices(timeout=10)
     except Exception as e:
@@ -668,6 +672,7 @@ def discover_lifx():
 async def discover_tapo():
     """Discover Tapo devices locally using LAN control."""
     global DEVICES
+    global discovery_start_time
 
     target = "192.168.1.255"
     timeout_s = int(os.getenv("TIMEOUT", 20))
@@ -751,19 +756,36 @@ async def discover_tapo():
         try:
             udn = "tapo-" + d.device_info.mac
             with DEVICES_LOCK:
-                DEVICES[udn] = {
-                    'uuid': udn,
-                    'device': d,
-                    'name': d.device_info.nickname,
-                    'model': d.device_info.model,
-                    'type': 'tapo',
-                    'ip': d.device_info.ip,
-                    'state': 1 if d.device_info.device_on is True else 0,
-                    'brightness': d.device_info.brightness,
-                    'last_seen': now,
-                    'hue': None if not hasattr(d.device_info,'hue') else d.device_info.hue,
-                    'saturation': None  if not hasattr(d.device_info,'saturation') else d.device_info.saturation,
-                }
+                print(f"processing discovered: {udn}")
+                print(f"discovery_start_time:{discovery_start_time}")
+                # print(f"device last:{DEVICES[udn]}")
+
+                existing = DEVICES.get(udn)
+                last_seen = existing.get("last_seen") if existing else None
+
+                should_update = (
+                        existing is None or
+                        last_seen is None or
+                        discovery_start_time > last_seen
+                        )
+                print(f"should update {should_update}")
+
+                if should_update:
+                    DEVICES[udn] = {
+                        'uuid': udn,
+                        'device': d,
+                        'name': d.device_info.nickname,
+                        'model': d.device_info.model,
+                        'type': 'tapo',
+                        'ip': d.device_info.ip,
+                        'state': 1 if d.device_info.device_on is True else 0,
+                        'brightness': d.device_info.brightness,
+                        'last_seen': now,
+                        'hue': None if not hasattr(d.device_info,'hue') else d.device_info.hue,
+                        'saturation': None  if not hasattr(d.device_info,'saturation') else d.device_info.saturation,
+                    }
+                else:
+                    print(f"ignoring {udn}")
                 sort_devices(DEVICES)
 
             print(f"Discovered Tapo device at {d.device_info.ip}: "
@@ -781,7 +803,14 @@ def run_async_tapo_discover():
 
 def discover_all():
     """Run all discoveries in parallel and sleep DISCOVERY_INTERVAL."""
+    global discovery_start_time
+    
     while True:
+        # grab the start time so that we can ignore discovered device 
+        # attributes if an api change ocurrs in the meantime.
+        discovery_start_time = time.time()
+
+        # kick off the discovery threads
         t1 = Thread(target=discover_wemo, daemon=True)
         t2 = Thread(target=discover_lifx, daemon=True)
         t3 = Thread(target=run_async_tapo_discover, daemon=True)
