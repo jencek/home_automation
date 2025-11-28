@@ -150,7 +150,8 @@ INDEX_HTML = """<!doctype html>
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 16px;
+      gap: 40px;
+      padding: 16px; /* optional: adds breathing room around edges */
     }
 
     .card {
@@ -626,16 +627,19 @@ def discover_lifx():
     """Discover LIFX lights (re-uses global LIFX_LAN and updates LIFX_CACHE)."""
     global LIFX_CACHE
     global DEVICES
+
+    print("discover_lifx():LIFX discovery starting")
     try:
         lights = LIFX_LAN.get_lights()
     except Exception as e:
-        print("LIFX discovery error:", e)
+        print("discover_lifx():LIFX discovery error:", e)
         lights = LIFX_CACHE  # fallback to last-known
 
     now = time.time()
     with DEVICES_LOCK:
         LIFX_CACHE = lights
         for l in lights:
+            print("discover_lifx():Iterating through discovered LIFX lights")
             try:
                 mac = l.get_mac_addr() if hasattr(l, 'get_mac_addr') else None
                 udn = "lifx-" + (mac.replace(":", "") if mac else str(id(l)))
@@ -651,6 +655,8 @@ def discover_lifx():
                     brightness = int(color[2] / 65535 * 100)
                 except Exception:
                     brightness = DEVICES.get(udn, {}).get('brightness')
+
+                print(f"discover_lifx():saving discovered LIFX device: {l.get_label() or mac or udn}")  
                 DEVICES[udn] = {
                     'uuid': udn,
                     'device': l,
@@ -804,7 +810,7 @@ def run_async_tapo_discover():
 def discover_all():
     """Run all discoveries in parallel and sleep DISCOVERY_INTERVAL."""
     global discovery_start_time
-    
+
     while True:
         # grab the start time so that we can ignore discovered device 
         # attributes if an api change ocurrs in the meantime.
