@@ -35,6 +35,8 @@ discovery_start_time = time.time()
 app = Flask(__name__)
 
 TAPO_CLIENT = ApiClient(tapo_username, tapo_password)
+
+
 TAPO_CACHE = []  # holds discovered Tapo devices
 
 
@@ -147,6 +149,7 @@ INDEX_HTML = """<!doctype html>
       transform: scale(1.05);
     }
 
+    
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -628,18 +631,20 @@ def discover_lifx():
     global LIFX_CACHE
     global DEVICES
 
-    print("discover_lifx():LIFX discovery starting")
+    print("LIFX discovery starting")
+
     try:
         lights = LIFX_LAN.get_lights()
     except Exception as e:
-        print("discover_lifx():LIFX discovery error:", e)
+        print("LIFX discovery error:", e)
         lights = LIFX_CACHE  # fallback to last-known
 
     now = time.time()
     with DEVICES_LOCK:
         LIFX_CACHE = lights
+
+        print("Iterating through discovered LIFX lights")
         for l in lights:
-            print("discover_lifx():Iterating through discovered LIFX lights")
             try:
                 mac = l.get_mac_addr() if hasattr(l, 'get_mac_addr') else None
                 udn = "lifx-" + (mac.replace(":", "") if mac else str(id(l)))
@@ -656,7 +661,7 @@ def discover_lifx():
                 except Exception:
                     brightness = DEVICES.get(udn, {}).get('brightness')
 
-                print(f"discover_lifx():saving discovered LIFX device: {l.get_label() or mac or udn}")  
+                print(f"saving discovered LIFX device: {l.get_label() or mac or udn}")    
                 DEVICES[udn] = {
                     'uuid': udn,
                     'device': l,
@@ -686,6 +691,7 @@ async def discover_tapo():
     print(f"Discovering Tapo devices on target: {target} for {timeout_s} seconds...")
 
     api_client = ApiClient(tapo_username, tapo_password)
+
     discovery = await api_client.discover_devices(target, timeout_s)
 
     # TAPO_CACHE.clear()
@@ -810,7 +816,7 @@ def run_async_tapo_discover():
 def discover_all():
     """Run all discoveries in parallel and sleep DISCOVERY_INTERVAL."""
     global discovery_start_time
-
+    
     while True:
         # grab the start time so that we can ignore discovered device 
         # attributes if an api change ocurrs in the meantime.
@@ -873,8 +879,22 @@ def api_devices():
     return jsonify({'devices': snapshot})
 
 
+async def turn_tapo_on(ip):
+    device = await TAPO_CLIENT.l530(ip)
+    #await device.login()
+    await device.on()
+async def turn_tapo_off(ip):
+    device = await TAPO_CLIENT.l530(ip)
+    #await device.login()
+    await device.off()
+
+
 @app.route('/api/device/<udn>/toggle', methods=['POST'])
 def api_toggle(udn):
+
+    # ensure logged in 
+    api_client = ApiClient(tapo_username, tapo_password)
+
     with DEVICES_LOCK:
         info = DEVICES.get(udn)
     if not info:
@@ -953,12 +973,25 @@ def api_toggle(udn):
                 new_state = not info['state']
                 print(f"new state: {new_state}")
 
+                #asyncio.run(dev.login())
+
                 if new_state is True:
                     print("turn on")
-                    asyncio.run(dev.handler.on())
+                    try:
+                      #asyncio.run(dev.handler.on())
+                      #dev.handler.on()
+
+                      ip = dev.ip
+                      asyncio.run(turn_tapo_on(ip))
+
+                    except Exception as e:
+                      print(f"error: {e}")    
                 else:
-                    asyncio.run(dev.handler.off())
+                    #asyncio.run(dev.handler.off())
                     print("turn off ")
+                    ip = dev.ip
+                    asyncio.run(turn_tapo_off(ip))
+
 
                 with DEVICES_LOCK:
                     print("updating in DEVICES_LOCK")
@@ -1032,7 +1065,12 @@ def api_brightness(udn):
             try:
                 dev = info['device']
                 print(f"set brightness: {b}")
-                asyncio.run(dev.handler.set_brightness(b))
+                #asyncio.run(dev.handler.set_brightness(b))
+                try:
+                  device = asyncio.run(TAPO_CLIENT.l530(dev.ip))
+                  asyncio.run(device.set_brightness(b))
+                except Exception as e:
+                  print(f"err:{e}")
 
                 with DEVICES_LOCK:
                     DEVICES[udn]['brightness'] = b
@@ -1080,7 +1118,12 @@ def api_saturation(udn):
                 # hue and saturation are set together. get the current 
                 # saturation
                 cur_hue = DEVICES[udn]['hue']
-                asyncio.run(dev.handler.set_hue_saturation(cur_hue, b)) 
+                #asyncio.run(dev.handler.set_hue_saturation(cur_hue, b)) 
+                try:
+                  device = asyncio.run(TAPO_CLIENT.l530(dev.ip))
+                  asyncio.run(device.set_hue_saturation(cur_hue, b))
+                except Exception as e:
+                  print(f"err:{e}")                
 
                 with DEVICES_LOCK:
                     DEVICES[udn]['saturation'] = b
@@ -1128,7 +1171,13 @@ def api_hue(udn):
                 # hue and saturation are set together. get the current 
                 # saturation
                 cur_saturation = DEVICES[udn]['saturation']
-                asyncio.run(dev.handler.set_hue_saturation(b, cur_saturation)) 
+                #asyncio.run(dev.handler.set_hue_saturation(b, cur_saturation)) 
+                try:
+                  device = asyncio.run(TAPO_CLIENT.l530(dev.ip))
+                  asyncio.run(device.set_hue_saturation(b, cur_saturation))
+                except Exception as e:
+                  print(f"err:{e}")
+
 
                 with DEVICES_LOCK:
                     DEVICES[udn]['hue'] = b
